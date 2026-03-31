@@ -1,15 +1,46 @@
 <template>
   <div style="padding: 20px;">
-    <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+    <!-- 顶部工具栏 -->
+    <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
       <div>
-        <h2>{{ formName }} - 提交记录</h2>
+        <h2 style="margin: 0;">{{ formName }} - 提交记录</h2>
       </div>
-      <div>
+      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <!-- 日期范围筛选 -->
+        <el-date-picker
+          v-model="dateRange"
+          type="daterange"
+          range-separator="至"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          value-format="YYYY-MM-DD"
+          style="width: 260px;"
+          @change="handleDateRangeChange"
+        />
+        <!-- 导出下拉菜单 -->
+        <el-dropdown @command="handleExportCommand" trigger="click">
+          <el-button type="success">
+            导出数据
+            <el-icon style="margin-left: 4px;"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="csv">
+                <el-icon><Document /></el-icon>
+                导出 CSV
+              </el-dropdown-item>
+              <el-dropdown-item command="excel">
+                <el-icon><Grid /></el-icon>
+                导出 Excel
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button @click="handleBack">返回</el-button>
-        <el-button type="success" @click="handleExport">导出数据</el-button>
       </div>
     </div>
 
+    <!-- 数据表格 -->
     <el-table :data="submissions" border style="width: 100%;" v-loading="loading">
       <el-table-column label="序号" width="70" type="index" />
       <el-table-column label="提交时间" width="180">
@@ -38,6 +69,7 @@
       </el-table-column>
     </el-table>
 
+    <!-- 分页 -->
     <div style="margin-top: 20px; text-align: center;">
       <el-pagination
         v-model:current-page="currentPage"
@@ -55,7 +87,8 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElLoading } from 'element-plus'
+import { ArrowDown, Document, Grid } from '@element-plus/icons-vue'
 import { formApi, submissionApi } from '../api/index.js'
 
 const props = defineProps(['id'])
@@ -68,6 +101,9 @@ const loading = ref(false)
 const currentPage = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
+
+// 日期范围：[startDate, endDate]，格式 YYYY-MM-DD
+const dateRange = ref(null)
 
 const formatTime = (time) => {
   if (!time) return '-'
@@ -92,7 +128,7 @@ const loadSubmissions = async () => {
   try {
     const formId = props.id || router.currentRoute.value.params.id
     const res = await submissionApi.getList(formId, currentPage.value, pageSize.value)
-    
+
     if (res.data && res.data.records) {
       total.value = res.data.total || 0
       submissions.value = res.data.records.map(record => ({
@@ -130,11 +166,27 @@ const handleSizeChange = (size) => {
   loadSubmissions()
 }
 
+const handleDateRangeChange = () => {
+  // 日期范围变化时重新加载（可选：也可以只在导出时使用）
+  currentPage.value = 1
+  loadSubmissions()
+}
+
 const handleBack = () => {
   router.push('/')
 }
 
-const handleExport = () => {
+/** 导出命令分发 */
+const handleExportCommand = (command) => {
+  if (command === 'csv') {
+    exportCsv()
+  } else if (command === 'excel') {
+    exportExcel()
+  }
+}
+
+/** 导出 CSV（前端生成） */
+const exportCsv = () => {
   if (submissions.value.length === 0) {
     ElMessage.warning('暂无数据可导出')
     return
@@ -160,7 +212,9 @@ const handleExport = () => {
 
   const csvContent = [
     headers.join(','),
-    ...rows.map(row => row.map(cell => `"${(cell || '').toString().replace(/"/g, '""')}"`).join(','))
+    ...rows.map(row =>
+      row.map(cell => `"${(cell || '').toString().replace(/"/g, '""')}"`).join(',')
+    )
   ].join('\n')
 
   const BOM = '\uFEFF'
@@ -170,8 +224,51 @@ const handleExport = () => {
   link.download = `${formName.value}_提交记录_${new Date().toISOString().slice(0, 10)}.csv`
   link.click()
   URL.revokeObjectURL(link.href)
+  ElMessage.success('CSV 导出成功')
+}
 
-  ElMessage.success('导出成功')
+/** 导出 Excel（调用后端接口） */
+const exportExcel = async () => {
+  const formId = props.id || router.currentRoute.value.params.id
+  const startDate = dateRange.value ? dateRange.value[0] : null
+  const endDate   = dateRange.value ? dateRange.value[1] : null
+
+  const loadingInstance = ElLoading.service({
+    text: '正在生成 Excel，请稍候...',
+    background: 'rgba(0,0,0,0.3)'
+  })
+
+  try {
+    const response = await submissionApi.exportExcel(formId, startDate, endDate)
+
+    // 从响应头获取文件名
+    const disposition = response.headers['content-disposition'] || ''
+    let fileName = `${formName.value}_提交记录.xlsx`
+    const match = disposition.match(/filename\*=UTF-8''(.+)/)
+    if (match) {
+      fileName = decodeURIComponent(match[1])
+    }
+
+    // 触发浏览器下载
+    const blob = new Blob([response.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+
+    ElMessage.success('Excel 导出成功')
+  } catch (error) {
+    console.error('Excel 导出失败:', error)
+    ElMessage.error('Excel 导出失败，请重试')
+  } finally {
+    loadingInstance.close()
+  }
 }
 
 onMounted(() => {

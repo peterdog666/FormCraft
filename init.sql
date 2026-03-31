@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS `form_schema` (
   `name` VARCHAR(255) NOT NULL COMMENT '表单名称',
   `description` TEXT COMMENT '表单描述',
   `schema` TEXT COMMENT '表单字段定义JSON',
+  `validation_rules` TEXT COMMENT '校验规则JSON',
   `status` TINYINT NOT NULL DEFAULT 0 COMMENT '状态: 0草稿 1已发布',
   `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -25,3 +26,6 @@ CREATE TABLE IF NOT EXISTS `form_submission` (
   KEY `idx_form_id` (`form_id`),
   KEY `idx_submit_time` (`submit_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='表单提交记录表';
+
+-- 如果是已有数据库，执行以下 ALTER 语句添加新字段（幂等）
+-- ALTER TABLE `form_schema` ADD COLUMN IF NOT EXISTS `validation_rules` TEXT COMMENT '校验规则JSON' AFTER `schema`;
